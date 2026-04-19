@@ -1,0 +1,28 @@
+# ─── Mirage-AI v2 — Python Dependencies ────────────────────────
+# Install with:   pip install -r requirements.txt
+# Python version: 3.10+ recommended
+
+# ── Web framework ────────────────────────────────────────────────
+flask>=3.0.0
+flask-cors>=4.0.0
+gunicorn>=21.2.0           # production WSGI server (optional for dev)
+python-dotenv>=1.0.0
+
+# ── PyTorch  (CPU-only — change index-url for CUDA builds) ───────
+# For GPU/CUDA 12.1:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+torch>=2.2.0
+torchvision>=0.17.0
+
+# ── Computer Vision ──────────────────────────────────────────────
+Pillow>=10.2.0
+numpy>=1.26.0
+
+# ── Face Recognition ─────────────────────────────────────────────
+facenet-pytorch>=2.5.3     # MTCNN + InceptionResnetV1
+
+# ── Perceptual metrics (optional but recommended) ────────────────
+pytorch-msssim>=0.2.1      # better SSIM computation; falls back gracefully if absent
+
+# ── Google Gemini (agent route) ──────────────────────────────────
+google-generativeai>=0.7.0

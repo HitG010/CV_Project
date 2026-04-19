@@ -1,0 +1,53 @@
+"""
+utils/image_utils.py — PIL ↔ tensor ↔ base64 helpers and preprocessing.
+"""
+import base64, io
+import torch
+import torchvision.transforms as transforms
+from torchvision.utils import save_image
+from PIL import Image
+from config import DEVICE
+
+# ── Normalisation constants ────────────────────────────────────────
+IMAGENET_MEAN = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(DEVICE)
+IMAGENET_STD  = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(DEVICE)
+
+# ── Standard transforms ───────────────────────────────────────────
+preprocess_224 = transforms.Compose([
+    transforms.Resize((224, 224)),
+    transforms.ToTensor(),
+])
+
+face_preprocess = transforms.Compose([
+    transforms.Resize((160, 160)),
+    transforms.ToTensor(),
+])
+
+to_tensor = transforms.ToTensor()
+
+
+def normalize(x: torch.Tensor) -> torch.Tensor:
+    """Pixel tensor [0,1] → ImageNet-normalised (in-place safe)."""
+    return (x - IMAGENET_MEAN) / IMAGENET_STD
+
+
+def denormalize(x: torch.Tensor) -> torch.Tensor:
+    return x * IMAGENET_STD + IMAGENET_MEAN
+
+
+# ── Conversion helpers ────────────────────────────────────────────
+def pil_to_b64(img: Image.Image, fmt: str = "PNG") -> str:
+    buf = io.BytesIO()
+    img.save(buf, format=fmt)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def b64_to_pil(s: str) -> Image.Image:
+    return Image.open(io.BytesIO(base64.b64decode(s))).convert("RGB")
+
+
+def tensor_to_b64(t: torch.Tensor, fmt: str = "PNG") -> str:
+    buf = io.BytesIO()
+    save_image(t, buf, format=fmt)
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode()
