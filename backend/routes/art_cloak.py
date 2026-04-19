@@ -51,12 +51,13 @@ def run_art_cloak(
             return None, {"error": f"Unknown class: {target_class_name}"}
 
     method = method.lower()
+    cw_info = None
     if method == "fgsm":
         adv = fgsm_attack(orig_img, target_idx, intensity, targeted, ensemble)
     elif method == "pgd":
         adv = pgd_attack(orig_img, target_idx, intensity, targeted, ensemble=ensemble)
     elif method == "cw":
-        adv = cw_l2_attack(orig_img, target_idx, targeted=targeted)
+        adv, cw_info = cw_l2_attack(orig_img, target_idx, targeted=targeted)
     else:
         adv = mi_fgsm_attack(orig_img, target_idx, intensity, targeted, ensemble=ensemble)
 
@@ -72,7 +73,7 @@ def run_art_cloak(
         if adv.shape != orig_px.shape else adv
     )
 
-    return tensor_to_b64(adv), {
+    resp = {
         "method":   method,
         "mode":     mode,
         "ensemble": ensemble,
@@ -88,6 +89,9 @@ def run_art_cloak(
         "quality_metrics": full_quality_metrics(orig_px.to(DEVICE), adv_full.to(DEVICE)),
         "attack_fooled":   IDX_TO_CLASS[top_a.indices[0]] != IDX_TO_CLASS[top_b.indices[0]],
     }
+    if cw_info is not None:
+        resp["cw_search"] = cw_info
+    return tensor_to_b64(adv), resp
 
 
 # ─────────────────────────────────────────────────────────────
