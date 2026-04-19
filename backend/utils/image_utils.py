@@ -27,10 +27,6 @@ to_tensor = transforms.ToTensor()
 
 
 def facenet_prewhiten(x: torch.Tensor) -> torch.Tensor:
-    """Per-image standardization used by FaceNet-style models.
-
-    Keeps gradients stable and matches expected embedding input scaling.
-    """
     if x.ndim != 4:
         raise ValueError("Expected NCHW tensor for FaceNet preprocessing")
     mean = x.mean(dim=(1, 2, 3), keepdim=True)
@@ -47,8 +43,6 @@ def normalize(x: torch.Tensor) -> torch.Tensor:
 def denormalize(x: torch.Tensor) -> torch.Tensor:
     return x * IMAGENET_STD + IMAGENET_MEAN
 
-
-# ── Conversion helpers ────────────────────────────────────────────
 def pil_to_b64(img: Image.Image, fmt: str = "PNG") -> str:
     buf = io.BytesIO()
     img.save(buf, format=fmt)

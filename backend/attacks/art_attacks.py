@@ -14,11 +14,6 @@ from utils.image_utils import (
     normalize, preprocess_224, to_tensor, IMAGENET_STD,
 )
 
-
-# ─────────────────────────────────────────────────────────────
-#  Internal helpers
-# ─────────────────────────────────────────────────────────────
-
 def _upsample_delta(delta_small: torch.Tensor, orig_size: tuple[int, int]) -> torch.Tensor:
     """Bilinear upsample a 224×224 perturbation to original (H, W)."""
     H, W = orig_size
@@ -28,10 +23,6 @@ def _upsample_delta(delta_small: torch.Tensor, orig_size: tuple[int, int]) -> to
 def _logits(x_norm: torch.Tensor, use_ensemble: bool) -> torch.Tensor:
     return ensemble_logits(x_norm) if use_ensemble else PRIMARY_MODEL(x_norm)
 
-
-# ─────────────────────────────────────────────────────────────
-#  FGSM  — single step
-# ─────────────────────────────────────────────────────────────
 
 def fgsm_attack(
     pil_img: Image.Image,
@@ -51,9 +42,6 @@ def fgsm_attack(
     return torch.clamp(orig + delta_up, 0, 1).detach()
 
 
-# ─────────────────────────────────────────────────────────────
-#  MI-FGSM  — Momentum Iterative FGSM (Dong et al., 2018)
-# ─────────────────────────────────────────────────────────────
 
 def mi_fgsm_attack(
     pil_img: Image.Image,
@@ -90,9 +78,6 @@ def mi_fgsm_attack(
     return torch.clamp(orig + delta_up, 0, 1).detach()
 
 
-# ─────────────────────────────────────────────────────────────
-#  PGD  — Projected Gradient Descent with random restart
-# ─────────────────────────────────────────────────────────────
 
 def pgd_attack(
     pil_img: Image.Image,
@@ -128,10 +113,6 @@ def pgd_attack(
     return torch.clamp(orig + delta_up, 0, 1).detach()
 
 
-# ─────────────────────────────────────────────────────────────
-#  C&W L2  — Carlini & Wagner minimum-distortion attack
-# ─────────────────────────────────────────────────────────────
-
 def cw_l2_attack(
     pil_img: Image.Image,
     target_idx: int,
@@ -143,9 +124,8 @@ def cw_l2_attack(
     lr: float = 5e-3,
 ) -> tuple[torch.Tensor, dict]:
     """
-    Minimises  ||δ||₂  +  c·f(x+δ)   via change-of-variable
-    w = atanh(2x − 1)  so  x_adv = 0.5·(tanh(w)+1) ∈ [0,1].
-    Works in 224×224 space; delta is upsampled back to original resolution.
+    This is a L2 norm attack that optimizes the Carlini-Wagner loss using Adam in tanh-space.
+    Grid search over multiple values of the confidence constant `c` is performed, and the best successful attack (or best overall if none succeed) is returned.
     """
     def _run_cw(c_val: float) -> tuple[torch.Tensor, float, float, bool]:
         x_orig = preprocess_224(pil_img).unsqueeze(0).to(DEVICE)

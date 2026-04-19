@@ -1,9 +1,4 @@
-"""
-attacks/face_attacks.py
-=======================
-Adversarial attacks that operate in FaceNet embedding space.
-Goal: maximally shift the face embedding so recognition systems fail.
-"""
+
 import torch
 import torch.nn.functional as F
 from PIL import Image
@@ -11,11 +6,6 @@ from config import DEVICE
 from models.face_models import FACENET, MTCNN_DET
 from utils.image_utils import face_preprocess, facenet_prewhiten, to_tensor
 from utils.metrics import full_quality_metrics
-
-
-# ─────────────────────────────────────────────────────────────
-#  Embedding loss
-# ─────────────────────────────────────────────────────────────
 
 def _face_loss(
     emb_adv: torch.Tensor,
@@ -32,11 +22,6 @@ def _embed(face_t: torch.Tensor) -> torch.Tensor:
     emb = FACENET(facenet_prewhiten(face_t))
     return F.normalize(emb, p=2, dim=1)
 
-
-# ─────────────────────────────────────────────────────────────
-#  FGSM in embedding space
-# ─────────────────────────────────────────────────────────────
-
 def face_fgsm(
     face_t: torch.Tensor,
     emb_orig: torch.Tensor,
@@ -48,10 +33,6 @@ def face_fgsm(
     _face_loss(_embed(x), emb_orig, emb_target, targeted).backward()
     return torch.clamp(face_t + epsilon * x.grad.sign(), 0, 1).detach()
 
-
-# ─────────────────────────────────────────────────────────────
-#  MI-FGSM in embedding space
-# ─────────────────────────────────────────────────────────────
 
 def face_mi_fgsm(
     face_t: torch.Tensor,
@@ -79,10 +60,6 @@ def face_mi_fgsm(
     return x_adv.detach()
 
 
-# ─────────────────────────────────────────────────────────────
-#  PGD in embedding space
-# ─────────────────────────────────────────────────────────────
-
 def face_pgd(
     face_t: torch.Tensor,
     emb_orig: torch.Tensor,
@@ -105,11 +82,6 @@ def face_pgd(
             0, 1
         )
     return x_adv.detach()
-
-
-# ─────────────────────────────────────────────────────────────
-#  Orchestrator: detect face → attack → paste back → metrics
-# ─────────────────────────────────────────────────────────────
 
 def cloak_face(
     orig_img: Image.Image,
