@@ -26,6 +26,19 @@ face_preprocess = transforms.Compose([
 to_tensor = transforms.ToTensor()
 
 
+def facenet_prewhiten(x: torch.Tensor) -> torch.Tensor:
+    """Per-image standardization used by FaceNet-style models.
+
+    Keeps gradients stable and matches expected embedding input scaling.
+    """
+    if x.ndim != 4:
+        raise ValueError("Expected NCHW tensor for FaceNet preprocessing")
+    mean = x.mean(dim=(1, 2, 3), keepdim=True)
+    std = x.std(dim=(1, 2, 3), keepdim=True, unbiased=False)
+    std_adj = torch.clamp(std, min=1.0 / (x[0].numel() ** 0.5))
+    return (x - mean) / std_adj
+
+
 def normalize(x: torch.Tensor) -> torch.Tensor:
     """Pixel tensor [0,1] → ImageNet-normalised (in-place safe)."""
     return (x - IMAGENET_MEAN) / IMAGENET_STD

@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from PIL import Image
 from config import DEVICE
 from models.face_models import FACENET, MTCNN_DET
-from utils.image_utils import face_preprocess, to_tensor
+from utils.image_utils import face_preprocess, facenet_prewhiten, to_tensor
 from utils.metrics import full_quality_metrics
 
 
@@ -28,6 +28,11 @@ def _face_loss(
     return -F.cosine_similarity(emb_adv, emb_orig).mean()
 
 
+def _embed(face_t: torch.Tensor) -> torch.Tensor:
+    emb = FACENET(facenet_prewhiten(face_t))
+    return F.normalize(emb, p=2, dim=1)
+
+
 # ─────────────────────────────────────────────────────────────
 #  FGSM in embedding space
 # ─────────────────────────────────────────────────────────────
@@ -40,7 +45,7 @@ def face_fgsm(
     targeted: bool,
 ) -> torch.Tensor:
     x = face_t.clone().requires_grad_(True)
-    _face_loss(FACENET(x), emb_orig, emb_target, targeted).backward()
+    _face_loss(_embed(x), emb_orig, emb_target, targeted).backward()
     return torch.clamp(face_t + epsilon * x.grad.sign(), 0, 1).detach()
 
 
@@ -63,10 +68,10 @@ def face_mi_fgsm(
 
     for _ in range(steps):
         x_adv = x_adv.detach().requires_grad_(True)
-        _face_loss(FACENET(x_adv), emb_orig, emb_target, targeted).backward()
+        _face_loss(_embed(x_adv), emb_orig, emb_target, targeted).backward()
         grad  = x_adv.grad / (x_adv.grad.abs().mean() + 1e-10)
         g     = mu * g + grad
-        step  = (-alpha if targeted else alpha) * g.sign()
+        step  = alpha * g.sign()
         x_adv = torch.clamp(
             torch.min(torch.max(x_adv + step, face_t - epsilon), face_t + epsilon),
             0, 1
@@ -93,8 +98,8 @@ def face_pgd(
     )
     for _ in range(steps):
         x_adv = x_adv.detach().requires_grad_(True)
-        _face_loss(FACENET(x_adv), emb_orig, emb_target, targeted).backward()
-        step  = (-alpha if targeted else alpha) * x_adv.grad.sign()
+        _face_loss(_embed(x_adv), emb_orig, emb_target, targeted).backward()
+        step  = alpha * x_adv.grad.sign()
         x_adv = torch.clamp(
             torch.min(torch.max(x_adv + step, face_t - epsilon), face_t + epsilon),
             0, 1
@@ -114,21 +119,35 @@ def cloak_face(
     target_identity_img: Image.Image | None = None,
 ) -> tuple[torch.Tensor | None, dict]:
 
-    boxes, _ = MTCNN_DET.detect(orig_img)
-    if boxes is None:
+    def _crop_first_face(img: Image.Image) -> tuple[Image.Image | None, tuple[int, int, int, int] | None]:
+        boxes, _ = MTCNN_DET.detect(img)
+        if boxes is None:
+            return None, None
+        x1, y1, x2, y2 = map(int, boxes[0])
+        w, h = img.size
+        x1 = max(0, min(x1, w - 1))
+        y1 = max(0, min(y1, h - 1))
+        x2 = max(x1 + 1, min(x2, w))
+        y2 = max(y1 + 1, min(y2, h))
+        return img.crop((x1, y1, x2, y2)), (x1, y1, x2, y2)
+
+    face_crop, box = _crop_first_face(orig_img)
+    if face_crop is None or box is None:
         return None, {"error": "No face detected"}
 
-    x1, y1, x2, y2 = map(int, boxes[0])
-    face_crop  = orig_img.crop((x1, y1, x2, y2))
+    x1, y1, x2, y2 = box
     face_t     = face_preprocess(face_crop).unsqueeze(0).to(DEVICE)
 
-    emb_orig   = FACENET(face_t).detach()
+    emb_orig   = _embed(face_t).detach()
     emb_target = None
     if targeted:
         if target_identity_img is None:
             return None, {"error": "Targeted attack requires a target identity image"}
-        emb_target = FACENET(
-            face_preprocess(target_identity_img).unsqueeze(0).to(DEVICE)
+        target_face, _ = _crop_first_face(target_identity_img)
+        if target_face is None:
+            return None, {"error": "No face detected in target identity image"}
+        emb_target = _embed(
+            face_preprocess(target_face).unsqueeze(0).to(DEVICE)
         ).detach()
 
     # Dispatch
@@ -156,7 +175,7 @@ def cloak_face(
     # Post-attack embedding
     import torchvision.transforms as T
     adv_crop  = T.ToPILImage()(perturbed[0, :, y1:y2, x1:x2].cpu())
-    emb_adv   = FACENET(face_preprocess(adv_crop).unsqueeze(0).to(DEVICE)).detach()
+    emb_adv   = _embed(face_preprocess(adv_crop).unsqueeze(0).to(DEVICE)).detach()
 
     cos_after  = float(F2.cosine_similarity(emb_orig, emb_adv))
     emb_dist   = float((emb_orig - emb_adv).norm())

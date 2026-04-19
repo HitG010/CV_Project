@@ -15,8 +15,7 @@ except ImportError:
 def compute_psnr(orig: torch.Tensor, adv: torch.Tensor) -> float:
     """PSNR in dB.  Higher → more imperceptible perturbation."""
     mse = F.mse_loss(adv, orig).item()
-    if mse == 0:
-        return float("inf")
+    mse = max(mse, 1e-12)
     return 10 * np.log10(1.0 / mse)
 
 
