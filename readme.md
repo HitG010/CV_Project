@@ -1,3 +1,19 @@
+## 🔐 Mirage-AI: Adversarial Cloaking for Visual Privacy
+
+In today’s digital ecosystem, images shared online are rapidly collected and analyzed by large-scale AI systems for tasks such as face recognition and object classification. These systems operate at the pixel level, extracting patterns that are often imperceptible to humans but highly informative for deep neural networks. As a result, individuals have little control over how their visual data is used once it is uploaded.
+
+Mirage-AI addresses this problem by leveraging the concept of **adversarial perturbations**—carefully crafted, minimal modifications to an image that remain visually indistinguishable to humans but significantly disrupt the predictions of AI models. Unlike traditional privacy methods such as blurring or watermarking, which degrade image quality or can be easily removed, adversarial cloaking operates directly within the feature space learned by neural networks.
+
+The system implements multiple state-of-the-art adversarial attack algorithms, including FGSM, PGD, MI-FGSM, and Carlini & Wagner (L2), to generate robust and transferable perturbations. These attacks are applied in two key scenarios:
+
+* **Face Cloaking**, where identity recognition systems are misled by altering embedding representations
+* **Art Cloaking**, where image classification models are forced to misclassify content
+
+To improve real-world effectiveness, Mirage-AI also incorporates an ensemble attack strategy across multiple deep learning architectures, increasing the likelihood of fooling unseen models. The result is a practical, scalable tool that enables users to protect their visual data without compromising perceptual quality.
+
+By bridging adversarial machine learning with privacy preservation, Mirage-AI highlights both the vulnerabilities of modern AI systems and the potential for defensive applications of these techniques.
+
+
 # Mirage-AI v2 — Adversarial Image Cloaking
 
 > MI-FGSM · FGSM · PGD · C&W L2 · Ensemble · Face Cloaking
