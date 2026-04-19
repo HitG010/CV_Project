@@ -32,66 +32,66 @@ def run_art_cloak(
     ensemble: bool = True,
 ) -> tuple[str | None, dict]:
 
-    orig_img = b64_to_pil(image_b64)
-    orig_px  = to_tensor(orig_img).unsqueeze(0).to(DEVICE)
+    original_image = b64_to_pil(image_b64)
+    original_tensor  = to_tensor(original_image).unsqueeze(0).to(DEVICE)
 
     with torch.no_grad():
-        x_norm   = normalize(preprocess_224(orig_img).unsqueeze(0).to(DEVICE))
-        probs_b  = F.softmax(PRIMARY_MODEL(x_norm), dim=1)[0]
+        input_norm   = normalize(preprocess_224(original_image).unsqueeze(0).to(DEVICE))
+        probs_before = F.softmax(PRIMARY_MODEL(input_norm), dim=1)[0]
 
-    targeted = (mode == "targeted")
+    is_targeted = (mode == "targeted")
 
     if target_class_name is None:
-        target_idx        = int(torch.argmax(probs_b))
-        target_class_name = IDX_TO_CLASS[target_idx]
+        target_index      = int(torch.argmax(probs_before))
+        target_class_name = IDX_TO_CLASS[target_index]
     else:
         try:
-            target_idx = IDX_TO_CLASS.index(target_class_name)
+            target_index = IDX_TO_CLASS.index(target_class_name)
         except ValueError:
             return None, {"error": f"Unknown class: {target_class_name}"}
 
     method = method.lower()
     cw_info = None
     if method == "fgsm":
-        adv = fgsm_attack(orig_img, target_idx, intensity, targeted, ensemble)
+        adv_tensor = fgsm_attack(original_image, target_index, intensity, is_targeted, ensemble)
     elif method == "pgd":
-        adv = pgd_attack(orig_img, target_idx, intensity, targeted, ensemble=ensemble)
+        adv_tensor = pgd_attack(original_image, target_index, intensity, is_targeted, ensemble=ensemble)
     elif method == "cw":
-        adv, cw_info = cw_l2_attack(orig_img, target_idx, targeted=targeted)
+        adv_tensor, cw_info = cw_l2_attack(original_image, target_index, targeted=is_targeted)
     else:
-        adv = mi_fgsm_attack(orig_img, target_idx, intensity, targeted, ensemble=ensemble)
+        adv_tensor = mi_fgsm_attack(original_image, target_index, intensity, is_targeted, ensemble=ensemble)
 
     with torch.no_grad():
-        adv_pil = T.ToPILImage()(adv.squeeze(0).cpu())
-        x_norm_a = normalize(preprocess_224(adv_pil).unsqueeze(0).to(DEVICE))
-        probs_a  = F.softmax(PRIMARY_MODEL(x_norm_a), dim=1)[0]
+        adv_pil = T.ToPILImage()(adv_tensor.squeeze(0).cpu())
+        adv_norm = normalize(preprocess_224(adv_pil).unsqueeze(0).to(DEVICE))
+        probs_after  = F.softmax(PRIMARY_MODEL(adv_norm), dim=1)[0]
 
-    top_b = torch.topk(probs_b, 3)
-    top_a = torch.topk(probs_a, 3)
-    adv_full = (
-        F.interpolate(adv, orig_px.shape[2:], mode="bilinear", align_corners=False)
-        if adv.shape != orig_px.shape else adv
+    top_before = torch.topk(probs_before, 3)
+    top_after = torch.topk(probs_after, 3)
+    adv_full_res = (
+        F.interpolate(adv_tensor, original_tensor.shape[2:], mode="bilinear", align_corners=False)
+        if adv_tensor.shape != original_tensor.shape else adv_tensor
     )
 
-    resp = {
+    response = {
         "method":   method,
         "mode":     mode,
         "ensemble": ensemble,
         "target_class": target_class_name,
         "original_top3": [
-            {"class": IDX_TO_CLASS[top_b.indices[i]], "prob": round(float(top_b.values[i]), 4)}
+            {"class": IDX_TO_CLASS[top_before.indices[i]], "prob": round(float(top_before.values[i]), 4)}
             for i in range(3)
         ],
         "cloaked_top3": [
-            {"class": IDX_TO_CLASS[top_a.indices[i]], "prob": round(float(top_a.values[i]), 4)}
+            {"class": IDX_TO_CLASS[top_after.indices[i]], "prob": round(float(top_after.values[i]), 4)}
             for i in range(3)
         ],
-        "quality_metrics": full_quality_metrics(orig_px.to(DEVICE), adv_full.to(DEVICE)),
-        "attack_fooled":   IDX_TO_CLASS[top_a.indices[0]] != IDX_TO_CLASS[top_b.indices[0]],
+        "quality_metrics": full_quality_metrics(original_tensor.to(DEVICE), adv_full_res.to(DEVICE)),
+        "attack_fooled":   IDX_TO_CLASS[top_after.indices[0]] != IDX_TO_CLASS[top_before.indices[0]],
     }
     if cw_info is not None:
-        resp["cw_search"] = cw_info
-    return tensor_to_b64(adv), resp
+        response["cw_search"] = cw_info
+    return tensor_to_b64(adv_tensor), response
 
 
 # ─────────────────────────────────────────────────────────────
@@ -108,16 +108,16 @@ def _get_image_b64(data, files) -> str | None:
 
 @art_bp.route("/art-cloak", methods=["POST"])
 def art_cloak_api():
-    data      = request.get_json() if request.is_json else request.form.to_dict()
-    image_b64 = _get_image_b64(data, request.files)
+    payload   = request.get_json() if request.is_json else request.form.to_dict()
+    image_b64 = _get_image_b64(payload, request.files)
     if not image_b64:
         return jsonify({"error": "No image provided"}), 400
 
-    method    = data.get("method", "mi_fgsm").lower()
-    intensity = float(data.get("intensity", 0.01))
-    mode      = data.get("mode", "untargeted").lower()
-    target    = data.get("target_class") or None
-    ensemble  = str(data.get("ensemble", "true")).lower() != "false"
+    method    = payload.get("method", "mi_fgsm").lower()
+    intensity = float(payload.get("intensity", 0.01))
+    mode      = payload.get("mode", "untargeted").lower()
+    target    = payload.get("target_class") or None
+    ensemble  = str(payload.get("ensemble", "true")).lower() != "false"
 
     cloaked_b64, resp = run_art_cloak(image_b64, intensity, mode, method, target, ensemble)
     if cloaked_b64 is None:
@@ -127,18 +127,20 @@ def art_cloak_api():
 
 @art_bp.route("/compare-attacks", methods=["POST"])
 def compare_attacks_api():
-    data      = request.get_json() if request.is_json else request.form.to_dict()
-    image_b64 = _get_image_b64(data, request.files)
+    payload   = request.get_json() if request.is_json else request.form.to_dict()
+    image_b64 = _get_image_b64(payload, request.files)
     if not image_b64:
         return jsonify({"error": "No image provided"}), 400
 
-    intensity = float(data.get("intensity", 0.01))
-    mode      = data.get("mode", "untargeted").lower()
-    target    = data.get("target_class") or None
+    intensity = float(payload.get("intensity", 0.01))
+    mode      = payload.get("mode", "untargeted").lower()
+    target    = payload.get("target_class") or None
 
     results = {}
-    for m in ["fgsm", "mi_fgsm", "pgd"]:
-        cloaked_b64, resp = run_art_cloak(image_b64, intensity, mode, m, target, ensemble=True)
-        results[m] = {"cloaked_image": cloaked_b64, "response": resp}
+    for method_name in ["fgsm", "mi_fgsm", "pgd"]:
+        cloaked_b64, resp = run_art_cloak(
+            image_b64, intensity, mode, method_name, target, ensemble=True
+        )
+        results[method_name] = {"cloaked_image": cloaked_b64, "response": resp}
 
     return jsonify({"comparison": results, "intensity": intensity}), 200

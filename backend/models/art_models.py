@@ -8,10 +8,20 @@ from config import DEVICE
 
 def load_art_models() -> dict[str, torch.nn.Module]:
     """Load ResNet50, VGG16, DenseNet121 (ImageNet pretrained, eval mode)."""
-    resnet = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1).eval().to(DEVICE)
-    vgg    = models.vgg16(weights=models.VGG16_Weights.IMAGENET1K_V1).eval().to(DEVICE)
-    dense  = models.densenet121(weights=models.DenseNet121_Weights.IMAGENET1K_V1).eval().to(DEVICE)
-    return {"resnet50": resnet, "vgg16": vgg, "densenet121": dense}
+    resnet50_model = models.resnet50(
+        weights=models.ResNet50_Weights.IMAGENET1K_V1
+    ).eval().to(DEVICE)
+    vgg16_model = models.vgg16(
+        weights=models.VGG16_Weights.IMAGENET1K_V1
+    ).eval().to(DEVICE)
+    densenet_model = models.densenet121(
+        weights=models.DenseNet121_Weights.IMAGENET1K_V1
+    ).eval().to(DEVICE)
+    return {
+        "resnet50": resnet50_model,
+        "vgg16": vgg16_model,
+        "densenet121": densenet_model,
+    }
 
 
 # Module-level singletons (imported by attacks & routes)

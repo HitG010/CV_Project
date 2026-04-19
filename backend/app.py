@@ -8,7 +8,8 @@ or production:
     gunicorn -w 1 -b 0.0.0.0:8080 app:app
 """
 import ssl
-ssl._create_default_https_context = ssl._create_unverified_context   # torchvision downloads
+# Allow model downloads in environments with strict SSL configuration.
+ssl._create_default_https_context = ssl._create_unverified_context
 
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -29,6 +30,7 @@ app.register_blueprint(agent_bp)
 
 @app.route("/")
 def home():
+    # Lightweight service metadata for quick health checks.
     return jsonify({
         "service":   "Mirage-AI v2",
         "version":   "2.0.0",

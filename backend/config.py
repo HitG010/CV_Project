@@ -27,7 +27,7 @@ def load_imagenet_classes() -> list[str]:
             "Download it from: https://raw.githubusercontent.com/pytorch/hub/master/imagenet_classes.txt\n"
             f"and place it at: {IMAGENET_CLASSES_FILE}"
         )
-    with open(IMAGENET_CLASSES_FILE) as f:
-        return [line.strip() for line in f]
+    with open(IMAGENET_CLASSES_FILE) as class_file:
+        return [line.strip() for line in class_file]
 
 IDX_TO_CLASS: list[str] = load_imagenet_classes()

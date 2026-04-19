@@ -31,11 +31,11 @@ _gemini = genai.GenerativeModel(
 def _safe_generate(prompt: str) -> dict:
     for attempt in range(4):
         try:
-            r    = _gemini.generate_content(prompt)
-            text = (r.text or "").strip()
-            m    = re.search(r"\{[\s\S]*\}", text)
-            if m:
-                return json.loads(m.group())
+            response = _gemini.generate_content(prompt)
+            text = (response.text or "").strip()
+            match = re.search(r"\{[\s\S]*\}", text)
+            if match:
+                return json.loads(match.group())
         except Exception as e:
             if "429" not in str(e) and "quota" not in str(e).lower():
                 break
@@ -47,28 +47,29 @@ def _safe_generate(prompt: str) -> dict:
 @agent_bp.route("/agent", methods=["POST"])
 def agent_api():
     try:
-        data = request.get_json() if request.is_json else request.form.to_dict()
-        user_message = (data.get("user_message") or "").strip()
+        payload = request.get_json() if request.is_json else request.form.to_dict()
+        user_message = (payload.get("user_message") or "").strip()
         if not user_message:
             return jsonify({"error": "user_message required"}), 400
 
-        image_b64 = data.get("image_base64")
+        image_b64 = payload.get("image_base64")
         if not image_b64:
-            f = request.files.get("file") or request.files.get("image")
-            if f:
-                image_b64 = pil_to_b64(Image.open(f).convert("RGB"))
+            uploaded_file = request.files.get("file") or request.files.get("image")
+            if uploaded_file:
+                image_b64 = pil_to_b64(Image.open(uploaded_file).convert("RGB"))
 
-        intensity    = float(data.get("intensity", 0.01))
-        method       = data.get("method", "mi_fgsm").lower()
-        mode         = data.get("mode", "untargeted").lower()
-        targeted     = str(data.get("targeted", "false")).lower() == "true"
-        target_class = data.get("target_class") or None
-        target_b64   = data.get("target_image_base64")
+        intensity    = float(payload.get("intensity", 0.01))
+        method       = payload.get("method", "mi_fgsm").lower()
+        mode         = payload.get("mode", "untargeted").lower()
+        targeted     = str(payload.get("targeted", "false")).lower() == "true"
+        target_class = payload.get("target_class") or None
+        target_b64   = payload.get("target_image_base64")
 
-        msg = user_message.lower()
-        if any(k in msg for k in ["face", "facial", "identity"]):
+        message_lower = user_message.lower()
+        # Basic intent routing based on keywords.
+        if any(k in message_lower for k in ["face", "facial", "identity"]):
             intent = "face_cloak"
-        elif any(k in msg for k in ["art", "cloak", "image protect"]):
+        elif any(k in message_lower for k in ["art", "cloak", "image protect"]):
             intent = "art_cloak"
         else:
             intent = "chat"
@@ -85,7 +86,7 @@ def agent_api():
             )
             cloaked_b64 = tensor_to_b64(perturbed) if perturbed is not None else None
 
-        expl = _safe_generate(
+        explanation = _safe_generate(
             f"{SYSTEM_PROMPT}\nUser: {user_message}\n"
             f"Tool: {intent}\nMetrics: {json.dumps(metrics or {})}"
         )
@@ -94,7 +95,7 @@ def agent_api():
             "intent":               intent,
             "tool_used":            intent if cloaked_b64 else None,
             "metrics":              metrics,
-            "explanation":          expl,
+            "explanation":          explanation,
             "cloaked_image_base64": cloaked_b64,
         }), 200
 

@@ -27,6 +27,7 @@ to_tensor = transforms.ToTensor()
 
 
 def facenet_prewhiten(x: torch.Tensor) -> torch.Tensor:
+    """Standardize each image in a batch the way FaceNet expects."""
     if x.ndim != 4:
         raise ValueError("Expected NCHW tensor for FaceNet preprocessing")
     mean = x.mean(dim=(1, 2, 3), keepdim=True)
@@ -44,17 +45,17 @@ def denormalize(x: torch.Tensor) -> torch.Tensor:
     return x * IMAGENET_STD + IMAGENET_MEAN
 
 def pil_to_b64(img: Image.Image, fmt: str = "PNG") -> str:
-    buf = io.BytesIO()
-    img.save(buf, format=fmt)
-    return base64.b64encode(buf.getvalue()).decode()
+    buffer = io.BytesIO()
+    img.save(buffer, format=fmt)
+    return base64.b64encode(buffer.getvalue()).decode()
 
 
-def b64_to_pil(s: str) -> Image.Image:
-    return Image.open(io.BytesIO(base64.b64decode(s))).convert("RGB")
+def b64_to_pil(b64_str: str) -> Image.Image:
+    return Image.open(io.BytesIO(base64.b64decode(b64_str))).convert("RGB")
 
 
-def tensor_to_b64(t: torch.Tensor, fmt: str = "PNG") -> str:
-    buf = io.BytesIO()
-    save_image(t, buf, format=fmt)
-    buf.seek(0)
-    return base64.b64encode(buf.read()).decode()
+def tensor_to_b64(tensor: torch.Tensor, fmt: str = "PNG") -> str:
+    buffer = io.BytesIO()
+    save_image(tensor, buffer, format=fmt)
+    buffer.seek(0)
+    return base64.b64encode(buffer.read()).decode()

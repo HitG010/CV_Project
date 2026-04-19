@@ -10,14 +10,13 @@ import torch.nn.functional as F
 from PIL import Image
 from config import DEVICE
 from models.art_models import PRIMARY_MODEL, ensemble_logits
-from utils.image_utils import (
-    normalize, preprocess_224, to_tensor, IMAGENET_STD,
-)
+from utils.image_utils import normalize, preprocess_224, to_tensor, IMAGENET_STD
 
-def _upsample_delta(delta_small: torch.Tensor, orig_size: tuple[int, int]) -> torch.Tensor:
-    """Bilinear upsample a 224×224 perturbation to original (H, W)."""
-    H, W = orig_size
-    return F.interpolate(delta_small, (H, W), mode="bilinear", align_corners=False)
+
+def _upsample_delta(delta_patch: torch.Tensor, original_size: tuple[int, int]) -> torch.Tensor:
+    """Bilinear upsample a 224x224 perturbation to the original (H, W)."""
+    height, width = original_size
+    return F.interpolate(delta_patch, (height, width), mode="bilinear", align_corners=False)
 
 
 def _logits(x_norm: torch.Tensor, use_ensemble: bool) -> torch.Tensor:
@@ -31,15 +30,17 @@ def fgsm_attack(
     targeted: bool,
     ensemble: bool = True,
 ) -> torch.Tensor:
-    x = preprocess_224(pil_img).unsqueeze(0).to(DEVICE).requires_grad_(True)
-    loss = F.cross_entropy(_logits(normalize(x), ensemble),
-                           torch.tensor([target_idx], device=DEVICE))
-    loss.backward()
-    sign   = x.grad.sign()
-    delta  = (-epsilon if targeted else epsilon) * sign * IMAGENET_STD
-    delta_up = _upsample_delta(delta.detach(), (pil_img.height, pil_img.width))
-    orig   = to_tensor(pil_img).unsqueeze(0).to(DEVICE)
-    return torch.clamp(orig + delta_up, 0, 1).detach()
+    input_tensor = preprocess_224(pil_img).unsqueeze(0).to(DEVICE).requires_grad_(True)
+    loss_val = F.cross_entropy(
+        _logits(normalize(input_tensor), ensemble),
+        torch.tensor([target_idx], device=DEVICE),
+    )
+    loss_val.backward()
+    grad_sign = input_tensor.grad.sign()
+    delta = (-epsilon if targeted else epsilon) * grad_sign * IMAGENET_STD
+    delta_upsampled = _upsample_delta(delta.detach(), (pil_img.height, pil_img.width))
+    orig_tensor = to_tensor(pil_img).unsqueeze(0).to(DEVICE)
+    return torch.clamp(orig_tensor + delta_upsampled, 0, 1).detach()
 
 
 
@@ -52,30 +53,32 @@ def mi_fgsm_attack(
     mu: float = 1.0,
     ensemble: bool = True,
 ) -> torch.Tensor:
-    alpha  = epsilon / steps
-    x_orig = preprocess_224(pil_img).unsqueeze(0).to(DEVICE)
-    x_adv  = x_orig.clone()
-    g      = torch.zeros_like(x_adv)
+    step_size = epsilon / steps
+    orig_tensor = preprocess_224(pil_img).unsqueeze(0).to(DEVICE)
+    adv_tensor = orig_tensor.clone()
+    momentum = torch.zeros_like(adv_tensor)
 
     for _ in range(steps):
-        x_adv = x_adv.detach().requires_grad_(True)
-        loss  = F.cross_entropy(_logits(normalize(x_adv), ensemble),
-                                torch.tensor([target_idx], device=DEVICE))
-        loss.backward()
-        grad  = x_adv.grad / (x_adv.grad.abs().mean() + 1e-10)
-        g     = mu * g + grad
-        step  = (-alpha if targeted else alpha) * g.sign()
-        x_adv = torch.clamp(
-            torch.min(torch.max(x_adv + step, x_orig - epsilon), x_orig + epsilon),
+        adv_tensor = adv_tensor.detach().requires_grad_(True)
+        loss_val = F.cross_entropy(
+            _logits(normalize(adv_tensor), ensemble),
+            torch.tensor([target_idx], device=DEVICE),
+        )
+        loss_val.backward()
+        grad = adv_tensor.grad / (adv_tensor.grad.abs().mean() + 1e-10)
+        momentum = mu * momentum + grad
+        step = (-step_size if targeted else step_size) * momentum.sign()
+        adv_tensor = torch.clamp(
+            torch.min(torch.max(adv_tensor + step, orig_tensor - epsilon), orig_tensor + epsilon),
             0, 1
         )
 
-    delta_up = _upsample_delta(
-        (x_adv - x_orig).detach() * IMAGENET_STD,
+    delta_upsampled = _upsample_delta(
+        (adv_tensor - orig_tensor).detach() * IMAGENET_STD,
         (pil_img.height, pil_img.width),
     )
-    orig = to_tensor(pil_img).unsqueeze(0).to(DEVICE)
-    return torch.clamp(orig + delta_up, 0, 1).detach()
+    orig_full = to_tensor(pil_img).unsqueeze(0).to(DEVICE)
+    return torch.clamp(orig_full + delta_upsampled, 0, 1).detach()
 
 
 
@@ -88,29 +91,31 @@ def pgd_attack(
     alpha_ratio: float = 2.5,
     ensemble: bool = True,
 ) -> torch.Tensor:
-    alpha  = epsilon / alpha_ratio
-    x_orig = preprocess_224(pil_img).unsqueeze(0).to(DEVICE)
-    x_adv  = torch.clamp(
-        x_orig + torch.empty_like(x_orig).uniform_(-epsilon, epsilon), 0, 1
+    step_size = epsilon / alpha_ratio
+    orig_tensor = preprocess_224(pil_img).unsqueeze(0).to(DEVICE)
+    adv_tensor = torch.clamp(
+        orig_tensor + torch.empty_like(orig_tensor).uniform_(-epsilon, epsilon), 0, 1
     )
 
     for _ in range(steps):
-        x_adv = x_adv.detach().requires_grad_(True)
-        loss  = F.cross_entropy(_logits(normalize(x_adv), ensemble),
-                                torch.tensor([target_idx], device=DEVICE))
-        loss.backward()
-        step  = (-alpha if targeted else alpha) * x_adv.grad.sign()
-        x_adv = torch.clamp(
-            torch.min(torch.max(x_adv + step, x_orig - epsilon), x_orig + epsilon),
+        adv_tensor = adv_tensor.detach().requires_grad_(True)
+        loss_val = F.cross_entropy(
+            _logits(normalize(adv_tensor), ensemble),
+            torch.tensor([target_idx], device=DEVICE),
+        )
+        loss_val.backward()
+        step = (-step_size if targeted else step_size) * adv_tensor.grad.sign()
+        adv_tensor = torch.clamp(
+            torch.min(torch.max(adv_tensor + step, orig_tensor - epsilon), orig_tensor + epsilon),
             0, 1
         )
 
-    delta_up = _upsample_delta(
-        (x_adv - x_orig).detach() * IMAGENET_STD,
+    delta_upsampled = _upsample_delta(
+        (adv_tensor - orig_tensor).detach() * IMAGENET_STD,
         (pil_img.height, pil_img.width),
     )
-    orig = to_tensor(pil_img).unsqueeze(0).to(DEVICE)
-    return torch.clamp(orig + delta_up, 0, 1).detach()
+    orig_full = to_tensor(pil_img).unsqueeze(0).to(DEVICE)
+    return torch.clamp(orig_full + delta_upsampled, 0, 1).detach()
 
 
 def cw_l2_attack(
@@ -124,49 +129,49 @@ def cw_l2_attack(
     lr: float = 5e-3,
 ) -> tuple[torch.Tensor, dict]:
     """
-    This is a L2 norm attack that optimizes the Carlini-Wagner loss using Adam in tanh-space.
-    Grid search over multiple values of the confidence constant `c` is performed, and the best successful attack (or best overall if none succeed) is returned.
+    L2-norm Carlini-Wagner attack optimized in tanh-space with Adam.
+    A small grid search over the confidence constant `c` picks the best result.
     """
     def _run_cw(c_val: float) -> tuple[torch.Tensor, float, float, bool]:
-        x_orig = preprocess_224(pil_img).unsqueeze(0).to(DEVICE)
-        w = torch.atanh(
-            torch.clamp(2 * x_orig - 1, -0.9999, 0.9999)
+        small_orig = preprocess_224(pil_img).unsqueeze(0).to(DEVICE)
+        tanh_w = torch.atanh(
+            torch.clamp(2 * small_orig - 1, -0.9999, 0.9999)
         ).detach().requires_grad_(True)
-        optim   = torch.optim.Adam([w], lr=lr)
-        t_label = torch.tensor([target_idx], device=DEVICE)
+        optimizer = torch.optim.Adam([tanh_w], lr=lr)
+        target_label = torch.tensor([target_idx], device=DEVICE)
         best_adv, best_l2 = None, float("inf")
-        best_any, best_f, best_any_l2 = None, float("inf"), float("inf")
+        best_any, best_constraint, best_any_l2 = None, float("inf"), float("inf")
 
         for _ in range(steps):
-            optim.zero_grad()
-            x_adv  = 0.5 * (torch.tanh(w) + 1)
-            logits = PRIMARY_MODEL(normalize(x_adv))
-            l2     = ((x_adv - x_orig) ** 2).sum(dim=(1, 2, 3))
-            one_hot = torch.zeros_like(logits).scatter_(1, t_label.unsqueeze(1), 1)
-            Z_t     = (logits * one_hot).sum(1)
-            Z_other = (logits * (1 - one_hot) - 1e9 * one_hot).max(1).values
-            f_loss  = (
-                torch.clamp(Z_other - Z_t + kappa, min=0) if targeted
-                else torch.clamp(Z_t - Z_other + kappa, min=0)
+            optimizer.zero_grad()
+            adv_small  = 0.5 * (torch.tanh(tanh_w) + 1)
+            logits = PRIMARY_MODEL(normalize(adv_small))
+            l2 = ((adv_small - small_orig) ** 2).sum(dim=(1, 2, 3))
+            one_hot = torch.zeros_like(logits).scatter_(1, target_label.unsqueeze(1), 1)
+            logit_target = (logits * one_hot).sum(1)
+            logit_other = (logits * (1 - one_hot) - 1e9 * one_hot).max(1).values
+            constraint = (
+                torch.clamp(logit_other - logit_target + kappa, min=0) if targeted
+                else torch.clamp(logit_target - logit_other + kappa, min=0)
             )
-            (l2 + c_val * f_loss).mean().backward()
-            optim.step()
+            (l2 + c_val * constraint).mean().backward()
+            optimizer.step()
             with torch.no_grad():
                 cur_l2 = float(l2.mean())
-                cur_f  = float(f_loss.mean())
-                if cur_f < best_f:
-                    best_f = cur_f
-                    best_any = x_adv.detach().clone()
+                cur_constraint = float(constraint.mean())
+                if cur_constraint < best_constraint:
+                    best_constraint = cur_constraint
+                    best_any = adv_small.detach().clone()
                     best_any_l2 = cur_l2
-                if cur_f <= 1e-6 and cur_l2 < best_l2:
+                if cur_constraint <= 1e-6 and cur_l2 < best_l2:
                     best_l2 = cur_l2
-                    best_adv = x_adv.detach().clone()
+                    best_adv = adv_small.detach().clone()
 
         success = best_adv is not None
         if not success:
-            best_adv = best_any if best_any is not None else x_adv.detach().clone()
+            best_adv = best_any if best_any is not None else adv_small.detach().clone()
             best_l2 = best_any_l2
-        return best_adv, best_l2, best_f, success
+        return best_adv, best_l2, best_constraint, success
 
     if c_candidates is None:
         base = max(float(c), 1e-4)
@@ -177,14 +182,14 @@ def cw_l2_attack(
     c_candidates = sorted(set(c_candidates))
 
     best_success_adv, best_success_l2 = None, float("inf")
-    best_success_c, best_success_f = None, float("inf")
+    best_success_c, best_success_constraint = None, float("inf")
     best_any_adv, best_any_f = None, float("inf")
     best_any_c, best_any_l2 = None, float("inf")
 
     for c_val in c_candidates:
-        adv, l2, f_val, success = _run_cw(c_val)
-        if f_val < best_any_f:
-            best_any_f = f_val
+        adv, l2, constraint_val, success = _run_cw(c_val)
+        if constraint_val < best_any_f:
+            best_any_f = constraint_val
             best_any_adv = adv
             best_any_c = c_val
             best_any_l2 = l2
@@ -192,13 +197,13 @@ def cw_l2_attack(
             best_success_l2 = l2
             best_success_adv = adv
             best_success_c = c_val
-            best_success_f = f_val
+            best_success_constraint = constraint_val
 
     if best_success_adv is not None:
         best_adv = best_success_adv
         best_c = best_success_c
         best_l2 = best_success_l2
-        best_f = best_success_f
+        best_f = best_success_constraint
         success = True
     else:
         best_adv = best_any_adv
@@ -207,12 +212,12 @@ def cw_l2_attack(
         best_f = best_any_f
         success = False
 
-    delta_up = _upsample_delta(
+    delta_upsampled = _upsample_delta(
         (best_adv - preprocess_224(pil_img).unsqueeze(0).to(DEVICE)).detach(),
         (pil_img.height, pil_img.width),
     )
-    orig = to_tensor(pil_img).unsqueeze(0).to(DEVICE)
-    return torch.clamp(orig + delta_up, 0, 1).detach(), {
+    orig_full = to_tensor(pil_img).unsqueeze(0).to(DEVICE)
+    return torch.clamp(orig_full + delta_upsampled, 0, 1).detach(), {
         "cw_best_c": best_c,
         "cw_best_f_loss": round(float(best_f), 6),
         "cw_best_l2": round(float(best_l2), 6),

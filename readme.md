@@ -32,7 +32,7 @@ mirage-ai/
 │   │   └── agent.py             ← /agent  (Gemini NLP router)
 │   │
 │   └── data/
-│       └── imagenet_classes.txt ← ⚠ must be present before running
+│       └── imagenet_classes.txt ← Add or auto download before running
 │
 └── frontend/
     ├── index.html

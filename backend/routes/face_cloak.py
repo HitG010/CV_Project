@@ -20,21 +20,23 @@ def _get_b64(data, files, key_json, key_file) -> str | None:
 
 @face_bp.route("/face-cloak", methods=["POST"])
 def face_cloak_api():
-    data = request.get_json() if request.is_json else request.form.to_dict()
+    payload = request.get_json() if request.is_json else request.form.to_dict()
 
-    image_b64 = _get_b64(data, request.files, "image_base64", "image")
+    image_b64 = _get_b64(payload, request.files, "image_base64", "image")
     if not image_b64:
         return jsonify({"error": "No image provided"}), 400
 
-    intensity  = float(data.get("intensity", 0.01))
-    method     = data.get("method", "mi_fgsm").lower()
-    targeted   = str(data.get("targeted", "false")).lower() == "true"
-    target_b64 = _get_b64(data, request.files, "target_image_base64", "target_image")
+    intensity  = float(payload.get("intensity", 0.01))
+    method     = payload.get("method", "mi_fgsm").lower()
+    targeted   = str(payload.get("targeted", "false")).lower() == "true"
+    target_b64 = _get_b64(payload, request.files, "target_image_base64", "target_image")
 
-    orig_img   = b64_to_pil(image_b64)
-    target_img = b64_to_pil(target_b64) if (targeted and target_b64) else None
+    original_image = b64_to_pil(image_b64)
+    target_image = b64_to_pil(target_b64) if (targeted and target_b64) else None
 
-    perturbed, metrics = cloak_face(orig_img, intensity, method, targeted, target_img)
+    perturbed, metrics = cloak_face(
+        original_image, intensity, method, targeted, target_image
+    )
     if perturbed is None:
         return jsonify(metrics), 400
 

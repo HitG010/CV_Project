@@ -15,6 +15,7 @@ except ImportError:
 def compute_psnr(orig: torch.Tensor, adv: torch.Tensor) -> float:
     """PSNR in dB.  Higher → more imperceptible perturbation."""
     mse = F.mse_loss(adv, orig).item()
+    # Avoid log(0) if images are identical (PSNR would be infinite).
     mse = max(mse, 1e-12)
     return 10 * np.log10(1.0 / mse)
 
@@ -24,16 +25,16 @@ def compute_ssim(orig: torch.Tensor, adv: torch.Tensor) -> float:
     Falls back to a fast approximation when pytorch-msssim is absent."""
     if HAS_MSSSIM:
         return float(_ssim_fn(orig, adv, data_range=1.0, size_average=True))
-    o, a = orig.flatten(), adv.flatten()
-    mu_o, mu_a = o.mean(), a.mean()
-    sigma_oa = ((o - mu_o) * (a - mu_a)).mean()
-    sigma_o2 = ((o - mu_o) ** 2).mean()
-    sigma_a2 = ((a - mu_a) ** 2).mean()
+    orig_flat, adv_flat = orig.flatten(), adv.flatten()
+    mu_orig, mu_adv = orig_flat.mean(), adv_flat.mean()
+    sigma_cross = ((orig_flat - mu_orig) * (adv_flat - mu_adv)).mean()
+    sigma_orig2 = ((orig_flat - mu_orig) ** 2).mean()
+    sigma_adv2 = ((adv_flat - mu_adv) ** 2).mean()
     C1, C2 = 0.01 ** 2, 0.03 ** 2
     ssim_val = (
-        (2 * mu_o * mu_a + C1) * (2 * sigma_oa + C2)
+        (2 * mu_orig * mu_adv + C1) * (2 * sigma_cross + C2)
     ) / (
-        (mu_o ** 2 + mu_a ** 2 + C1) * (sigma_o2 + sigma_a2 + C2)
+        (mu_orig ** 2 + mu_adv ** 2 + C1) * (sigma_orig2 + sigma_adv2 + C2)
     )
     return float(ssim_val)
 

@@ -19,8 +19,8 @@ def _face_loss(
 
 
 def _embed(face_t: torch.Tensor) -> torch.Tensor:
-    emb = FACENET(facenet_prewhiten(face_t))
-    return F.normalize(emb, p=2, dim=1)
+    embedding = FACENET(facenet_prewhiten(face_t))
+    return F.normalize(embedding, p=2, dim=1)
 
 def face_fgsm(
     face_t: torch.Tensor,
@@ -29,9 +29,9 @@ def face_fgsm(
     epsilon: float,
     targeted: bool,
 ) -> torch.Tensor:
-    x = face_t.clone().requires_grad_(True)
-    _face_loss(_embed(x), emb_orig, emb_target, targeted).backward()
-    return torch.clamp(face_t + epsilon * x.grad.sign(), 0, 1).detach()
+    adv_input = face_t.clone().requires_grad_(True)
+    _face_loss(_embed(adv_input), emb_orig, emb_target, targeted).backward()
+    return torch.clamp(face_t + epsilon * adv_input.grad.sign(), 0, 1).detach()
 
 
 def face_mi_fgsm(
@@ -43,21 +43,21 @@ def face_mi_fgsm(
     steps: int = 10,
     mu: float = 1.0,
 ) -> torch.Tensor:
-    alpha = epsilon / steps
-    x_adv = face_t.clone()
-    g     = torch.zeros_like(x_adv)
+    step_size = epsilon / steps
+    adv_tensor = face_t.clone()
+    momentum = torch.zeros_like(adv_tensor)
 
     for _ in range(steps):
-        x_adv = x_adv.detach().requires_grad_(True)
-        _face_loss(_embed(x_adv), emb_orig, emb_target, targeted).backward()
-        grad  = x_adv.grad / (x_adv.grad.abs().mean() + 1e-10)
-        g     = mu * g + grad
-        step  = alpha * g.sign()
-        x_adv = torch.clamp(
-            torch.min(torch.max(x_adv + step, face_t - epsilon), face_t + epsilon),
+        adv_tensor = adv_tensor.detach().requires_grad_(True)
+        _face_loss(_embed(adv_tensor), emb_orig, emb_target, targeted).backward()
+        grad = adv_tensor.grad / (adv_tensor.grad.abs().mean() + 1e-10)
+        momentum = mu * momentum + grad
+        step = step_size * momentum.sign()
+        adv_tensor = torch.clamp(
+            torch.min(torch.max(adv_tensor + step, face_t - epsilon), face_t + epsilon),
             0, 1
         )
-    return x_adv.detach()
+    return adv_tensor.detach()
 
 
 def face_pgd(
@@ -69,19 +69,19 @@ def face_pgd(
     steps: int = 20,
     alpha_ratio: float = 2.5,
 ) -> torch.Tensor:
-    alpha = epsilon / alpha_ratio
-    x_adv = torch.clamp(
+    step_size = epsilon / alpha_ratio
+    adv_tensor = torch.clamp(
         face_t + torch.empty_like(face_t).uniform_(-epsilon, epsilon), 0, 1
     )
     for _ in range(steps):
-        x_adv = x_adv.detach().requires_grad_(True)
-        _face_loss(_embed(x_adv), emb_orig, emb_target, targeted).backward()
-        step  = alpha * x_adv.grad.sign()
-        x_adv = torch.clamp(
-            torch.min(torch.max(x_adv + step, face_t - epsilon), face_t + epsilon),
+        adv_tensor = adv_tensor.detach().requires_grad_(True)
+        _face_loss(_embed(adv_tensor), emb_orig, emb_target, targeted).backward()
+        step = step_size * adv_tensor.grad.sign()
+        adv_tensor = torch.clamp(
+            torch.min(torch.max(adv_tensor + step, face_t - epsilon), face_t + epsilon),
             0, 1
         )
-    return x_adv.detach()
+    return adv_tensor.detach()
 
 def cloak_face(
     orig_img: Image.Image,
@@ -108,9 +108,9 @@ def cloak_face(
         return None, {"error": "No face detected"}
 
     x1, y1, x2, y2 = box
-    face_t     = face_preprocess(face_crop).unsqueeze(0).to(DEVICE)
+    face_tensor = face_preprocess(face_crop).unsqueeze(0).to(DEVICE)
 
-    emb_orig   = _embed(face_t).detach()
+    emb_orig   = _embed(face_tensor).detach()
     emb_target = None
     if targeted:
         if target_identity_img is None:
@@ -125,14 +125,14 @@ def cloak_face(
     # Dispatch
     method = method.lower()
     if method == "fgsm":
-        adv_face = face_fgsm(face_t, emb_orig, emb_target, intensity, targeted)
+        adv_face = face_fgsm(face_tensor, emb_orig, emb_target, intensity, targeted)
     elif method == "pgd":
-        adv_face = face_pgd(face_t, emb_orig, emb_target, intensity, targeted)
+        adv_face = face_pgd(face_tensor, emb_orig, emb_target, intensity, targeted)
     else:  # default: mi_fgsm
-        adv_face = face_mi_fgsm(face_t, emb_orig, emb_target, intensity, targeted)
+        adv_face = face_mi_fgsm(face_tensor, emb_orig, emb_target, intensity, targeted)
 
     # Upsample delta and paste back onto full image
-    delta_small = adv_face - face_t
+    delta_small = adv_face - face_tensor
     face_H, face_W = y2 - y1, x2 - x1
     import torch.nn.functional as F2
     delta_big = F2.interpolate(
@@ -146,12 +146,12 @@ def cloak_face(
 
     # Post-attack embedding
     import torchvision.transforms as T
-    adv_crop  = T.ToPILImage()(perturbed[0, :, y1:y2, x1:x2].cpu())
-    emb_adv   = _embed(face_preprocess(adv_crop).unsqueeze(0).to(DEVICE)).detach()
+    adv_crop = T.ToPILImage()(perturbed[0, :, y1:y2, x1:x2].cpu())
+    emb_adv = _embed(face_preprocess(adv_crop).unsqueeze(0).to(DEVICE)).detach()
 
-    cos_after  = float(F2.cosine_similarity(emb_orig, emb_adv))
-    emb_dist   = float((emb_orig - emb_adv).norm())
-    quality    = full_quality_metrics(orig_tensor, perturbed)
+    cos_after = float(F2.cosine_similarity(emb_orig, emb_adv))
+    emb_dist = float((emb_orig - emb_adv).norm())
+    quality = full_quality_metrics(orig_tensor, perturbed)
 
     metrics = {
         "method": method,
