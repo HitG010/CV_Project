@@ -14,7 +14,7 @@ To improve real-world effectiveness, Mirage-AI also incorporates an ensemble att
 By bridging adversarial machine learning with privacy preservation, Mirage-AI highlights both the vulnerabilities of modern AI systems and the potential for defensive applications of these techniques.
 
 
-# Mirage-AI v2 — Adversarial Image Cloaking
+# Mirage-AI — Adversarial Image Cloaking
 
 > MI-FGSM · FGSM · PGD · C&W L2 · Ensemble · Face Cloaking
 
